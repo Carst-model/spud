@@ -1,4 +1,4 @@
-#!/usr/bin/env python                                                                                                                                                                                          
+#!/usr/bin/env python
 
 #    This file is part of Diamond.
 #
@@ -15,146 +15,165 @@
 #    You should have received a copy of the GNU General Public License
 #    along with Diamond.  If not, see <http://www.gnu.org/licenses/>.
 
-from lxml import etree
+import copy
 import os
 import os.path
-from . import debug
 import sys
-import copy
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from future.standard_library import install_aliases
+from lxml import etree
+
+from . import debug
+
 install_aliases()
-import urllib.request, urllib.error, urllib.parse
+
 
 def preprocess(schemafile):
-  p = etree.XMLParser(remove_comments=True)
-  ns = 'http://relaxng.org/ns/structure/1.0'
+    p = etree.XMLParser(remove_comments=True)
+    ns = 'http://relaxng.org/ns/structure/1.0'
 
-  if 'http' in schemafile:
-    schemafile_handle = urllib.request.urlopen(schemafile)
-  else:
-    schemafile_handle = open(schemafile)
-  
-  try:
-  	tree = etree.parse(schemafile_handle, p)
-  except Exception:
-  	debug.deprint("Error: %s is not a valid Relax NG schema" % schemafile, 0)
-  	sys.exit(1)
+    if 'http' in schemafile:
+        schemafile_handle = urllib.request.urlopen(schemafile)
+    else:
+        schemafile_handle = open(schemafile)
 
-  #
-  # deal with include
-  #
-  includes = tree.xpath('/t:grammar//t:include', namespaces={'t': ns})
+    try:
+        tree = etree.parse(schemafile_handle, p)
+    except Exception:
+        debug.deprint("Error: %s is not a valid Relax NG schema" % schemafile,
+                      0)
+        sys.exit(1)
 
-  for include in includes:
-    include_parent = include.getparent()
-    include_index = list(include_parent).index(include)
+    #
+    # deal with include
+    #
+    includes = tree.xpath('/t:grammar//t:include', namespaces={'t': ns})
 
-    # find the file
-    file = None
-    filename = include.attrib["href"]
-    possible_files = [os.path.join(os.path.dirname(schemafile), filename), filename]
-    possible_files.append(os.path.join("@prefix@/share/spud", filename))
-    possible_files.append(os.path.join(os.path.dirname(__file__) + "/../../schema", filename))
+    for include in includes:
+        include_parent = include.getparent()
+        include_index = list(include_parent).index(include)
 
-    for possible_file in possible_files:
-      try:
-        if 'http' in possible_file:
-          file = urllib.request.urlopen(possible_file)
-        else:
-          file = open(possible_file)
-        break
-      except IOError:
-        debug.deprint("IOError when searching for included file " + filename, 1)
+        # find the file
+        file = None
+        filename = include.attrib["href"]
+        possible_files = [
+            os.path.join(os.path.dirname(schemafile), filename), filename
+        ]
+        possible_files.append(os.path.join("@prefix@/share/spud", filename))
+        possible_files.append(
+            os.path.join(
+                os.path.dirname(__file__) + "/../../schema", filename))
 
-    if file is None:
-      debug.deprint("Error: could not locate included file %s" % filename, 0)
-      debug.deprint("Path: %s" % possible_files)
-      sys.exit(1)
+        for possible_file in possible_files:
+            try:
+                if 'http' in possible_file:
+                    file = urllib.request.urlopen(possible_file)
+                else:
+                    file = open(possible_file)
+                break
+            except IOError:
+                debug.deprint(
+                    "IOError when searching for included file " + filename, 1)
 
-    # parse the included xml file and steal all the nodes
-    include_tree = etree.parse(file, p)
-    nodes_to_take = include_tree.xpath('/t:grammar/*', namespaces={'t': ns})
+        if file is None:
+            debug.deprint(
+                "Error: could not locate included file %s" % filename, 0)
+            debug.deprint("Path: %s" % possible_files)
+            sys.exit(1)
 
-    # here's where the magic happens:
-    for node in nodes_to_take:
-      include_parent.insert(include_index, copy.deepcopy(node))
+        # parse the included xml file and steal all the nodes
+        include_tree = etree.parse(file, p)
+        nodes_to_take = include_tree.xpath('/t:grammar/*',
+                                           namespaces={'t': ns})
 
-    # now delete the include:
-    include_parent.remove(include)
+        # here's where the magic happens:
+        for node in nodes_to_take:
+            include_parent.insert(include_index, copy.deepcopy(node))
 
-  grammar_list = tree.xpath('/t:grammar', namespaces={'t': ns})
-  
-  # If the .rnc didn't include a start = prefix, then no valid
-  # grammar tag will be present. Let the user know.
-  
-  if len(grammar_list) == 0:
-  		debug.deprint("Error: No grammar tag present in schema.", 0)
-	  	sys.exit(1)
+        # now delete the include:
+        include_parent.remove(include)
 
-  grammar = grammar_list[0]
+    grammar_list = tree.xpath('/t:grammar', namespaces={'t': ns})
 
-  defines = {}
-  define_nodes = tree.xpath('/t:grammar//t:define', namespaces={'t': ns})
+    # If the .rnc didn't include a start = prefix, then no valid
+    # grammar tag will be present. Let the user know.
 
-  #
-  # deal with combine="interleave"
-  #
+    if len(grammar_list) == 0:
+        debug.deprint("Error: No grammar tag present in schema.", 0)
+        sys.exit(1)
 
-  # first, fetch all the plain definitions
-  for define in define_nodes:
-    if "combine" not in define.attrib:
-      name = define.attrib["name"]
-      defines[name] = define
+    grammar = grammar_list[0]
 
-  # now look for interleaves with those
-  for define in define_nodes:
-    if "combine" in define.attrib and define.attrib["combine"] == "interleave":
-      name = define.attrib["name"]
-      if name not in defines:
+    defines = {}
+    define_nodes = tree.xpath('/t:grammar//t:define', namespaces={'t': ns})
+
+    #
+    # deal with combine="interleave"
+    #
+
+    # first, fetch all the plain definitions
+    for define in define_nodes:
+        if "combine" not in define.attrib:
+            name = define.attrib["name"]
+            defines[name] = define
+
+    # now look for interleaves with those
+    for define in define_nodes:
+        if "combine" in define.attrib and define.attrib[
+                "combine"] == "interleave":
+            name = define.attrib["name"]
+            if name not in defines:
+                defines[name] = define
+            else:
+                matching_defn = defines[name]
+                for child in define:
+                    matching_defn.append(copy.deepcopy(child))
+
+    #
+    # deal with combine="choice"
+    #
+    combine_names = []
+    for define in define_nodes:
+        if "combine" in define.attrib and define.attrib["combine"] == "choice":
+            name = define.attrib["name"]
+            combine_names.append(name)
+
+    combine_names = list(set(combine_names))
+    for name in combine_names:
+        xpath = tree.xpath('/t:grammar//t:define[@name="%s"]' % name,
+                           namespaces={'t': ns})
+        choices = []
+        for node in xpath:
+            choices = choices + list(node)
+        define = etree.Element("define")
+        define.attrib["name"] = name
+        choice = etree.Element("choice")
+        define.append(choice)
+        for x in choices:
+            choice.append(x)
         defines[name] = define
-      else:
-        matching_defn = defines[name]
-        for child in define:
-          matching_defn.append(copy.deepcopy(child))
-  
-  #
-  # deal with combine="choice"
-  #
-  combine_names = []
-  for define in define_nodes:
-    if "combine" in define.attrib and define.attrib["combine"] == "choice":
-      name = define.attrib["name"]
-      combine_names.append(name)
 
-  combine_names = list(set(combine_names))
-  for name in combine_names:
-    xpath = tree.xpath('/t:grammar//t:define[@name="%s"]' % name, namespaces={'t': ns})
-    choices = []
-    for node in xpath:
-      choices = choices + list(node)
-    define = etree.Element("define")
-    define.attrib["name"] = name
-    choice = etree.Element("choice")
-    define.append(choice)
-    for x in choices:
-      choice.append(x)
-    defines[name] = define
+    # delete all the define nodes from the xml
+    for define in define_nodes:
+        parent = define.getparent()
+        parent.remove(define)
 
-  # delete all the define nodes from the xml
-  for define in define_nodes:
-    parent = define.getparent()
-    parent.remove(define)
-  
-  # add the modified defines back to the grammar
-  for define in list(defines.values()):
-    grammar.append(define)
+    # add the modified defines back to the grammar
+    for define in list(defines.values()):
+        grammar.append(define)
 
-  return etree.tostring(tree, xml_declaration=True, encoding='utf-8', pretty_print=True)
+    return etree.tostring(tree,
+                          xml_declaration=True,
+                          encoding='utf-8',
+                          pretty_print=True)
+
 
 if __name__ == "__main__":
-  import sys
-  schemafile = sys.argv[1]
-  newfile = schemafile.replace(".rng", ".pp.rng")
-  f = open(newfile, "w")
-  f.write(preprocess(schemafile))
+    import sys
+    schemafile = sys.argv[1]
+    newfile = schemafile.replace(".rng", ".pp.rng")
+    f = open(newfile, "w")
+    f.write(preprocess(schemafile))
