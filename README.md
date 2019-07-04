@@ -1,5 +1,8 @@
 # Spud
 
+## NOTE
+*This is a heavily stripped-down version of spud; it only includes the base schema, diamond and dxdiff. In use by the [Carst model](https://github.com/Carst-model/carst).*
+
 Spud is a generic system for defining, writing and processing options files for scientific computer models.
 
 The interfaces to scientific computer models are frequently primitive, under-documented and ad-hoc text files. This makes using and developing the model in question difficult and error-prone.
